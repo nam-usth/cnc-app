@@ -50,8 +50,8 @@ def rindex(lst, value):
     return len(lst) - operator.indexOf(reversed(lst), value) - 1
 
 def nose_phase_measurement_reset():
-    global val_max, search_flg, sharpness, sharpness_list, nFrame, total_frame, error_id
-    global mse_list, peak_list
+    global val_max, search_flg, sharpness, sharpness_list, peak_list, nFrame, total_frame, error_id
+    global mse_list
     global prev_image
     
     val_max = -1
@@ -65,80 +65,10 @@ def nose_phase_measurement_reset():
     error_id = 0
     prev_image = None
     
-def crop_img(image, focus_width=400, focus_length=400):
-    x1 = image.shape[1]//2 - focus_width//2
-    y1 = image.shape[0]//2 - focus_length//2
-    x2 = image.shape[1]//2 + focus_width//2
-    y2 = image.shape[0]//2 + focus_length//2
-
-    crop_image = image[y1:y2, x1:x2]
-    return crop_image
-
-def calculate_sharpness(crop_image):
-    gray_image = cv2.cvtColor(crop_image, cv2.COLOR_BGR2GRAY)
-    sharpness = variance_of_laplacian(gray_image)
-    return sharpness
-
-def add_mse_sharpness_nose_phase(image, focus_width, focus_length):
-    global mse_list
-    global prev_image
-    image_org = image.copy()
-    image = crop_img(image, focus_width, focus_length)
-    if prev_image is None:
-        mse_value = -1
-    else:
-        mse_value = mse(prev_image, image)
-    prev_image = image
-    #cv2.imwrite(f"storage/{len(mse_list)}.jpg", image_org)
-    mse_list.append({'mse': mse_value, 'sh' : calculate_sharpness(image)})
-    
-def clearn_duplicate_nose_phase():
-    global mse_list
-    index_first = -1
-    index_last = -1
-    for index, item in enumerate(mse_list):
-        if item["mse"] == -1:
-            continue
-        if index + 1 == len(mse_list):
-            break
-        item_next = mse_list[index + 1]
-        ratio = item_next["mse"] / item["mse"]
-        if ratio > 1.25 or ratio < 0.75:
-            index_first = index
-            break
-    if index_first == -1:
-        # error ko thay doi
-        return False
-    #mse_list = mse_list[index_first:]
-    for index in range(len(mse_list), 0, -1):
-        index -= 1
-        if index - 1 < 0:
-            break
-        item = mse_list[index]
-        item_pre = mse_list[index - 1]
-        ratio = item_pre["mse"] / item["mse"]
-        if ratio > 1.25 or ratio < 0.75:
-            index_last = index
-            break
-    mse_list = mse_list[index_first:index_last]
-    #return mse_list
-    #print("index_first : ", index_first, " index_last : ", index_last)
-    #print("mse_list : ", mse_list)
-    return True
-
-def find_max_sharpness_nose_phase():
-    global mse_list
-    index_max = -1
-    max_sharpness = -1
-    for index, item in enumerate(mse_list):
-        if item["sh"] > max_sharpness:
-            max_sharpness = item["sh"]
-            index_max = index
-    return index_max, len(mse_list)
     
 # %% Image processing functions
 
-def get_focus_zone(image, focus_width=400, focus_length=400):
+def get_focus_zone(image, focus_width=200, focus_length=200):
     x1 = image.shape[1]//2 - focus_width//2
     y1 = image.shape[0]//2 - focus_length//2
     x2 = image.shape[1]//2 + focus_width//2
@@ -217,16 +147,6 @@ def remove_black_background(image):
     return mask, blade_image, image
 
 
-def binary_threshold(image):
-    roi = image
-
-    gray = cv2.cvtColor(roi,cv2.COLOR_BGR2GRAY)
-
-    blur = cv2.GaussianBlur(gray, (5, 5), 0)
-    _, binary = cv2.threshold(blur, 70, 255, cv2.THRESH_BINARY)
-    
-    return roi, binary, image
-
 def sharpen(image):    
     kernel = np.array([[0, -1, 0],
                    [-1, 5,-1],
@@ -277,9 +197,8 @@ def API_nose_phase_measurement_final_streaming(image): # A.k.a super slow step
     global difference_Y, difference_Z, temp_Y, temp_Z
     global peak_list, peak_point
     
-    move_flg = 1
+    move_flg = True
     search_flg = 1
-    error_id = 0
     
     try:  
         image_clone = image.copy()
@@ -294,7 +213,6 @@ def API_nose_phase_measurement_final_streaming(image): # A.k.a super slow step
             
         center = [crop_image.shape[1]//2, crop_image.shape[0]//2]
         
-        '''
         mask_1, blade_image_1, original = get_blade_hsv(crop_image)
         mask_2, blade_image_2, original = remove_black_background(crop_image)
         
@@ -305,12 +223,12 @@ def API_nose_phase_measurement_final_streaming(image): # A.k.a super slow step
             
         # Find contours
         approximations = approx_contour(edge_image, blade_image)
-        
+
         # Find the closest point to center
         approximations = np.reshape(approximations, (-1, 2))
         dist = np.linalg.norm(np.subtract(approximations, center), axis=1)
         idx = np.unravel_index(np.argmin(dist), dist.shape)
-        
+
         if approximations is not None:
             [difference_Y, difference_Z] = np.subtract(approximations[idx], center)
 
@@ -326,73 +244,36 @@ def API_nose_phase_measurement_final_streaming(image): # A.k.a super slow step
             
             peak_list.append(horizontal_coord)
             
-        '''
-        
-        roi, binary, original = binary_threshold(image)
-        
-        #blade_image = cv2.bitwise_and(image, image, mask=binary)
-        
-        contours, hierarchy = cv2.findContours(binary, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-        cnt = max(contours, key=lambda x: cv2.contourArea(x))
-        # roi = cv2.drawContours(roi, cnt, -1, (0, 255, 0), 2)
-        hull = cv2.convexHull(cnt, False)
-        hull_reshape = np.reshape(hull, (-1, 2))
-    
-        # compute x+y 
-        hull_plus = np.sum(hull_reshape, axis=1)
-        
-        max_plus = np.amax(hull_plus)
-        
-        thres_plus = max_plus - (image.shape[1]*0.01 + image.shape[0]*0.01)
-        
-        idx_plus = [index for index, value in enumerate(hull_plus) if value >= thres_plus]
-
-        x_max = 0
-        for it in idx_plus:
-            if x_max < hull_reshape[it][0]:
-                x_max = hull_reshape[it][0]
-                res_max = hull_reshape[it]
-                
-            cv2.circle(roi, (hull_reshape[it][0], hull_reshape[it][1]), 1, (0, 0, 255), -1)
-            
-            if hull_reshape[it][0] + hull_reshape[it][1] == max_plus:
-                cv2.circle(roi, (hull_reshape[it][0], hull_reshape[it][1]), 1, (0, 255, 255), -1)
-        
-        point_max = (res_max[0], res_max[1])
-        
-        [difference_Y, difference_Z] = np.subtract(point_max, center)
-        
-        peak_list.append(res_max[0])
-        
-        # DEBUG 
-        print(peak_list)
-        
-        '''
-        if non_increasing(peak_list[-2:]):
-            move_flg = 0
-        '''
-        if len(peak_list) > 1:
-            if peak_list[len(peak_list) - 1] < peak_list[len(peak_list) - 2]:
+            '''
+            if non_increasing(peak_list[-2:]):
                 move_flg = 0
+            '''
+            if len(peak_list) > 1:
+                if peak_list[len(peak_list) - 1] < peak_list[len(peak_list) - 2]:
+                    move_flg = 0
             
-        if np.linalg.norm([difference_Y, difference_Z]) <= 20: # 10
-            temp_Y, temp_Z = 0, 0
+            '''
+            if np.linalg.norm([difference_Y, difference_Z]) <= 20: # 10
+                temp_Y, temp_Z = 0, 0
+                
+            else:
+                temp_Y, temp_Z = difference_Y, difference_Z
+            '''
+        
+        # Result for demo ONLY 
+        temp_Y, temp_Z = 0, 0 
             
-        else:
-            temp_Y, temp_Z = difference_Y, difference_Z
-          
         total_frame += 1
         
         # For DEBUGGING purpose ONLY
         cv2.imwrite('./storage/SUPER_SLOW_Frame_' + str(total_frame) + '_phase_search.jpg', image_clone)
-        cv2.imwrite('./storage/point/SUPER_SLOW_Frame_' + str(total_frame) + '_phase_search_point.jpg', roi)
-        #cv2.imwrite('./storage/point/SUPER_SLOW_Frame_' + str(total_frame) + '_phase_search_point.jpg', blade_image)
+        cv2.imwrite('./storage/point/SUPER_SLOW_Frame_' + str(total_frame) + '_phase_search_point.jpg', blade_image)
     
     except:
         pass
-
+        
     return search_flg, temp_Y, temp_Z, move_flg, error_id
-    
+
 
 def API_nose_phase_measurement_slow_streaming(image):    
     global val_max, search_flg, sharpness_list, nFrame, total_frame, error_id
@@ -403,7 +284,7 @@ def API_nose_phase_measurement_slow_streaming(image):
     try:  
         
         h, w = image.shape[0], image.shape[1]
-        '''
+        
         if prev_image is None:
             prev_image = image
             
@@ -411,14 +292,14 @@ def API_nose_phase_measurement_slow_streaming(image):
         
         #mse_array = np.asarray(mse_list).reshape(-1, 1)
 
-        
+        '''
         kmeans = KMeans(n_clusters=2).fit(mse_array)
         M = kmeans.predict(mse_array)
         D = np.abs(np.diff(M))
         
         start_dup = index(D, 1) - 1
         end_dup = rindex(D, 1) + 1
-        
+        '''
         
         start_dup = len(mse_list)-1
         
@@ -439,7 +320,8 @@ def API_nose_phase_measurement_slow_streaming(image):
             if (mse_list[i] > mean*1.35) or (mse_list[i] < mean*0.65):
                 end_dup = i
                 break
-        '''
+        
+        #print('Start Dup: ', start_dup, ' - End Dup: ', end_dup)
         
         image_clone = image.copy()
         
@@ -450,12 +332,10 @@ def API_nose_phase_measurement_slow_streaming(image):
         sharpness_list.append(sharpness)
         
         if sharpness >= THRESHOLD:
-            
             alpha = 0.5
             
             center = [crop_image.shape[1]//2, crop_image.shape[0]//2]
             
-            '''
             mask_1, blade_image_1, original = get_blade_hsv(crop_image)
             mask_2, blade_image_2, original = remove_black_background(crop_image)
             
@@ -492,86 +372,41 @@ def API_nose_phase_measurement_slow_streaming(image):
                     nFrame = total_frame
                     peak_point = approximations[idx]
                     
+                    '''
                     if np.linalg.norm([difference_Y, difference_Z]) <= 20: # 10
                         temp_Y, temp_Z = 0, 0
                         search_flg = 1
                     else:
                         temp_Y, temp_Z = difference_Y, difference_Z
-            '''
-          
-            roi, binary, original = binary_threshold(image)
-            
-            #blade_image = cv2.bitwise_and(image, image, mask=binary)
-            
-            contours, hierarchy = cv2.findContours(binary, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-            cnt = max(contours, key=lambda x: cv2.contourArea(x))
-            # roi = cv2.drawContours(roi, cnt, -1, (0, 255, 0), 2)
-            hull = cv2.convexHull(cnt, False)
-            hull_reshape = np.reshape(hull, (-1, 2))
-        
-            # compute x+y 
-            hull_plus = np.sum(hull_reshape, axis=1)
-            
-            max_plus = np.amax(hull_plus)
-            
-            thres_plus = max_plus - (image.shape[1]*0.01 + image.shape[0]*0.01)
-            
-            idx_plus = [index for index, value in enumerate(hull_plus) if value >= thres_plus]
-    
-            x_max = 0
-            for it in idx_plus:
-                if x_max < hull_reshape[it][0]:
-                    x_max = hull_reshape[it][0]
-                    res_max = hull_reshape[it]
+                    '''
                     
-                #cv2.circle(roi, (hull_reshape[it][0], hull_reshape[it][1]), 1, (0, 0, 255), -1)
-                
-                if hull_reshape[it][0] + hull_reshape[it][1] == max_plus:
-                    cv2.putText(roi, "[{}, {}]".format(hull_reshape[it][0], hull_reshape[it][1]), (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 255, 0), 6)
-
-                    cv2.circle(roi, (hull_reshape[it][0], hull_reshape[it][1]), 1, (0, 255, 255), -1)
-            
-            point_max = (res_max[0], res_max[1])
-            
-            peak_list.append(res_max[0])
-            if (val_max < res_max[0]):
-                val_max = res_max[0]
-                nFrame = total_frame
-                
-            #[difference_Y, difference_Z] = np.subtract(point_max, center)
-        
-        temp_Y, temp_Z = 0, 0
-            
         total_frame += 1
         
         prev_image = image
         
-        print(val_max)
-        
         # For DEBUGGING purpose ONLY
         cv2.imwrite('./storage/SLOW_Frame_' + str(total_frame) + '_phase_search.jpg', image_clone)
-        cv2.imwrite('./storage/point/SLOW_Frame_' + str(total_frame) + '_phase_search_point.jpg', roi)
+        cv2.imwrite('./storage/point/SLOW_Frame_' + str(total_frame) + '_phase_search_point.jpg', blade_image)
     
     except:
         pass
-        
+    
+    # Result for demo ONLY 
+    temp_Y, temp_Z = 0, 0
+    search_flg = 1
+
     try:
-        '''
         frame_idx = nFrame - (start_dup - 1)
         if frame_idx < 0:
             frame_idx = 0
-        '''
-        
+            
         if len(peak_list) == 0:
             error_id = 1004
-        elif len(peak_list) > 0:
-            error_id = 0
-            search_flg = 1
         
         #print('Start Dup: ', start_dup, ' - End Dup: ', end_dup)
         #print('nFrame: ', frame_idx)
-        #print(str(peak_list))
-        return search_flg, nFrame, total_frame, temp_Y, temp_Z, error_id
+        
+        return search_flg, frame_idx, (end_dup + 1) - start_dup, temp_Y, temp_Z, error_id
     except:
         return search_flg, 0, 0, 0, 0, 1009
 
@@ -623,7 +458,7 @@ def API_nose_phase_measurement_fast_streaming(image):
         start_dup = index(D, 1) - 1
         end_dup = rindex(D, 1) + 1
         '''
-        '''
+        
         start_dup = len(mse_list)-1
         
         for i in range(3, len(mse_list)):
@@ -643,8 +478,7 @@ def API_nose_phase_measurement_fast_streaming(image):
             if (mse_list[i] > mean*1.8) or (mse_list[i] < mean*0.4):
                 end_dup = i
                 break
-        '''
-        
+            
         alpha = 0.5
         
         center = [image_temp.shape[1]//2, image_temp.shape[0]//2]
@@ -667,25 +501,28 @@ def API_nose_phase_measurement_fast_streaming(image):
 
         if approximations is not None:
             [difference_Y, difference_Z] = np.subtract(approximations[idx], center)
-            
+        
+        '''
         if np.linalg.norm([difference_Y, difference_Z]) <= 100:
             [difference_Y, difference_Z] = [0, 0]
         
-        search_flg = 1
+            search_flg = 1
+        '''
 
+        # Result for demo ONLY        
+        [difference_Y, difference_Z] = [0, 0]
+
+        search_flg = 1
+        
     except:
         error_id = 1001                
 
     try:
-        '''
-        print("startduq" + str(start_dup) + "  " + str(end_dup))
         frame_idx = nFrame - (start_dup - 1)
         if frame_idx < 0:
             frame_idx = 0
-        '''
         
-        # return search_flg, frame_idx, (end_dup + 1) - start_dup, difference_Y, difference_Z, error_id
-        return search_flg, nFrame, total_frame, difference_Y, difference_Z, error_id
+        return search_flg, frame_idx, (end_dup + 1) - start_dup, difference_Y, difference_Z, error_id
     except:
         return search_flg, 0, 0, difference_Y, difference_Z, error_id
     
