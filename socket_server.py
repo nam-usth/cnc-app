@@ -91,9 +91,6 @@ def auto_focus_streaming_start(data):
     focus_width = int(data['focusWidth'])
     t = Thread(target=thread_auto_focus, args=(socketio, cam_id, focus_width, focus_length), daemon=True)
     t.start()
-<<<<<<< Updated upstream
-       
-=======
     
 @socketio.on('auto_focus_streaming_low_stop')
 def auto_focus_streaming_low_stop(data):
@@ -109,7 +106,6 @@ def auto_focus_streaming_low_stop(data):
         "FPS": 30,
         "errorID" : 0 if totalFrame != -1 else 1004,
     })
->>>>>>> Stashed changes
 
 @socketio.on('auto_focus_streaming_stop')
 def auto_focus_streaming_stop(data):
@@ -232,8 +228,6 @@ def nose_phase_measurement_final(data):
     t = Thread(target=thread_nose_phase_measurement_final, args=(socketio, cam_id,), daemon=True)
     t.start()
 
-<<<<<<< Updated upstream
-=======
 @socketio.on('straight_edge_detection')
 def straight_edge_detection(data):
     time.sleep(0.6)
@@ -541,7 +535,6 @@ def edge_detection_fn(data):
 
     t = Thread(target=thread_hermite, args=(points, filename), daemon=True)
     t.start()
->>>>>>> Stashed changes
 
 # %% API routes
 
